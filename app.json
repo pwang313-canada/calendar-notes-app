@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "calendar-notes-app",
+    "name": "Calendar Notes",
     "slug": "calendar-notes-app",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -20,13 +20,33 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.laopi.calendarnotesapp"
+      "package": "org.cakk.calendarnotesapp",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "output": "static",
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Allow $(PRODUCT_NAME) to access your camera to take photos for calendar dates.",
+          "photosPermission": "Allow $(PRODUCT_NAME) to access your photos to save pictures for calendar dates.",
+          "microphonePermission": "Allow $(PRODUCT_NAME) to access your microphone for video recording."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png"
+        }
+      ],
       "expo-router",
       [
         "expo-splash-screen",

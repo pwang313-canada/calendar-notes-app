@@ -1,6 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import * as Notifications from 'expo-notifications';
 import { memo, useEffect, useState } from 'react';
 import {
   Alert,
@@ -17,43 +16,21 @@ import {
 } from 'react-native';
 import { Calendar } from 'react-native-calendars';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
-import { getAllDatesWithImages } from './src//utils/imageStorage'; // ✅ import
+
+// Utils
 import DateImageModal from './src/components/DateImageModal';
+import { getAllDatesWithImages } from './src/utils/imageStorage';
+import {
+  cancelNotification,
+  registerForNotifications,
+  scheduleNotification,
+  setupNotificationHandler,
+} from './src/utils/notifications';
 
-// ---------- Configure notification handler ----------
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+// Setup notification handler once (outside component)
+setupNotificationHandler();
 
-// ---------- Helper: schedule notification ----------
-async function scheduleNotification(id: string, alarmTimestamp: number, noteText: string, icon: string) {
-  await Notifications.cancelScheduledNotificationAsync(id);
-  const now = Date.now();
-  if (alarmTimestamp <= now) {
-    Alert.alert('Invalid time', 'Alarm must be set in the future.');
-    return false;
-  }
-  await Notifications.scheduleNotificationAsync({
-    identifier: id,
-    content: {
-      title: `📅 Reminder for ${id}`,
-      body: `${icon} ${noteText.substring(0, 50)}`,
-    },
-    trigger: {
-      type: Notifications.SchedulableTriggerInputTypes.DATE,
-      date: new Date(alarmTimestamp),
-    },
-  });
-  return true;
-}
-
-// ---------- Custom Day Component (shows icon + optional picture dot) ----------
+// ---------- Custom Day Component ----------
 const CustomDay = memo(
   ({ date, state, onPress, notes, pictureDates }: any) => {
     const dateString = date.dateString;
@@ -67,6 +44,8 @@ const CustomDay = memo(
 
     if (hasNote) {
       containerStyle = { ...containerStyle, ...styles.dayWithNote };
+    } else if (hasPicture) {
+      containerStyle = { ...containerStyle, ...styles.dayWithPicture };
     }
     if (state === 'disabled') {
       textStyle = { ...textStyle, ...styles.disabledDayText };
@@ -77,6 +56,9 @@ const CustomDay = memo(
         <Text style={textStyle}>{date.day}</Text>
         {hasNote && <Text style={styles.dayIcon}>{icon}</Text>}
         {hasPicture && !hasNote && <Text style={styles.dayIcon}>📷</Text>}
+        {hasPicture && hasNote && (
+          <View style={styles.pictureDot} />
+        )}
       </TouchableOpacity>
     );
   },
@@ -89,7 +71,6 @@ const CustomDay = memo(
   }
 );
 
-// ---------- Main App Component ----------
 export default function App() {
   const [notes, setNotes] = useState<Record<string, { text: string; icon: string; alarm?: number }>>({});
   const [modalVisible, setModalVisible] = useState(false);
@@ -99,36 +80,27 @@ export default function App() {
   const [alarmDate, setAlarmDate] = useState<Date | null>(null);
   const [isDatePickerVisible, setDatePickerVisibility] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
-  const [pictureModalVisible, setPictureModalVisible] = useState(false);  // ✅ separate modal for pictures
-  const [pictureDates, setPictureDates] = useState<string[]>([]);        // ✅ dates that have pictures
+  const [pictureModalVisible, setPictureModalVisible] = useState(false);
+  const [pictureDates, setPictureDates] = useState<string[]>([]);
 
   const showDatePickerModal = () => setDatePickerVisibility(true);
   const hideDatePickerModal = () => setDatePickerVisibility(false);
-  // ✅ Load picture dates and refresh when needed
+
+  // Load picture dates
   const loadPictureDates = async () => {
     const dates = await getAllDatesWithImages();
     setPictureDates(dates);
   };
 
-  // ---------- Request permissions on mount ----------
-  useEffect(() => {
-    (async () => {
-      const { status } = await Notifications.requestPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission needed', 'Enable notifications to receive reminders.');
-      }
-    })();
-    loadNotes();
-    loadPictureDates(); // ✅ load picture markers
-  }, []);
-
-  // ---------- Load notes from storage ----------
+  // Load notes from storage
   const loadNotes = async () => {
     try {
       const stored = await AsyncStorage.getItem('calendar_notes');
       if (stored) {
         const parsed = JSON.parse(stored);
         setNotes(parsed);
+
+        // Re-schedule existing alarms
         for (const [date, data] of Object.entries(parsed) as any[]) {
           if (data.alarm && data.alarm > Date.now()) {
             await scheduleNotification(date, data.alarm, data.text, data.icon);
@@ -140,11 +112,7 @@ export default function App() {
     }
   };
 
-  // ---------- Persist notes ----------
-  useEffect(() => {
-    saveNotes(notes);
-  }, [notes]);
-
+  // Persist notes
   const saveNotes = async (notesToSave: any) => {
     try {
       await AsyncStorage.setItem('calendar_notes', JSON.stringify(notesToSave));
@@ -153,14 +121,39 @@ export default function App() {
     }
   };
 
+  // Initialize app
+  useEffect(() => {
+    const initialize = async () => {
+      await registerForNotifications();
+      await loadNotes();
+      await loadPictureDates();
+    };
+
+    initialize();
+  }, []);
+
+  // Auto-save notes when changed
+  useEffect(() => {
+    saveNotes(notes);
+  }, [notes]);
+
   const onDayPress = (day: any) => {
     const dateString = day.dateString;
-    setSelectedDate(dateString);
     const existing = notes[dateString];
-    setNoteText(existing?.text || '');
-    setSelectedIcon(existing?.icon || '📝');
-    setAlarmDate(existing?.alarm ? new Date(existing.alarm) : null);
-    setModalVisible(true);
+    const hasPicture = pictureDates.includes(dateString);
+
+    setSelectedDate(dateString);
+
+    if (hasPicture && !existing) {
+      // Date has picture but no note → open picture viewer directly
+      setPictureModalVisible(true);
+    } else {
+      // Date has note, or nothing → open note editor
+      setNoteText(existing?.text || '');
+      setSelectedIcon(existing?.icon || '📝');
+      setAlarmDate(existing?.alarm ? new Date(existing.alarm) : null);
+      setModalVisible(true);
+    }
   };
 
   const saveNote = async () => {
@@ -169,7 +162,7 @@ export default function App() {
 
     if (trimmed === '' && !alarmDate) {
       delete updatedNotes[selectedDate];
-      await Notifications.cancelScheduledNotificationAsync(selectedDate);
+      await cancelNotification(selectedDate);
     } else {
       const alarmTimestamp = alarmDate ? alarmDate.getTime() : undefined;
       updatedNotes[selectedDate] = {
@@ -177,10 +170,11 @@ export default function App() {
         icon: selectedIcon,
         alarm: alarmTimestamp,
       };
+
       if (alarmTimestamp) {
-        await scheduleNotification(selectedDate, alarmTimestamp, trimmed, selectedIcon);
+        await scheduleNotification(selectedDate, alarmTimestamp, trimmed || '', selectedIcon);
       } else {
-        await Notifications.cancelScheduledNotificationAsync(selectedDate);
+        await cancelNotification(selectedDate);
       }
     }
 
@@ -191,7 +185,7 @@ export default function App() {
 
   const deleteNote = async () => {
     if (notes[selectedDate]) {
-      await Notifications.cancelScheduledNotificationAsync(selectedDate);
+      await cancelNotification(selectedDate);
       const updatedNotes = { ...notes };
       delete updatedNotes[selectedDate];
       setNotes(updatedNotes);
@@ -248,16 +242,14 @@ export default function App() {
         dayComponent={(props) => (
           <CustomDay {...props} onPress={onDayPress} notes={notes} pictureDates={pictureDates} />
         )}
-        theme={
-          {
-            calendarBackground: '#ffffff',
-            monthTextColor: '#2d3748',
-            textMonthFontSize: 18,
-            textMonthFontWeight: 'bold',
-            arrowColor: '#4a5568',
-            todayTextColor: '#e53e3e',
-          } as any
-        }
+        theme={{
+          calendarBackground: '#ffffff',
+          monthTextColor: '#2d3748',
+          textMonthFontSize: 18,
+          textMonthFontWeight: 'bold',
+          arrowColor: '#4a5568',
+          todayTextColor: '#e53e3e',
+        }}
       />
 
       {/* Legend */}
@@ -312,7 +304,7 @@ export default function App() {
               textAlignVertical="top"
             />
 
-            {/* ✅ Picture Button */}
+            {/* Picture Button */}
             <TouchableOpacity
               style={styles.pictureButton}
               onPress={() => {
@@ -323,30 +315,29 @@ export default function App() {
               <Text style={styles.pictureButtonText}>📷 Manage Picture for this Date</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.alarmButton}
-              onPress={() => setShowDatePicker(true)}
-            >
+            <TouchableOpacity style={styles.alarmButton} onPress={showDatePickerModal}>
               <Text style={styles.alarmButtonText}>
                 {alarmDate ? `⏰ Alarm: ${alarmDate.toLocaleString()}` : '🔔 Set reminder (optional)'}
               </Text>
             </TouchableOpacity>
+
             {alarmDate && (
               <TouchableOpacity style={styles.clearAlarmButton} onPress={() => setAlarmDate(null)}>
                 <Text style={styles.clearAlarmText}>Clear alarm</Text>
               </TouchableOpacity>
             )}
-            
+
             <DateTimePickerModal
               isVisible={isDatePickerVisible}
               mode="datetime"
               onConfirm={(date) => {
                 setAlarmDate(date);
-                hideDatePickerModal();   // ✅ use helper
+                hideDatePickerModal();
               }}
-              onCancel={hideDatePickerModal}   // ✅ use helper
+              onCancel={hideDatePickerModal}
               minimumDate={new Date()}
             />
+
             {showDatePicker && (
               <DateTimePicker
                 value={alarmDate || new Date()}
@@ -354,12 +345,11 @@ export default function App() {
                 display={Platform.OS === 'ios' ? 'spinner' : 'default'}
                 onChange={(event, selectedDate) => {
                   setShowDatePicker(false);
-                  if (selectedDate) {
-                    setAlarmDate(selectedDate);
-                  }
+                  if (selectedDate) setAlarmDate(selectedDate);
                 }}
               />
             )}
+
             <View style={styles.modalButtons}>
               <TouchableOpacity style={[styles.button, styles.deleteButton]} onPress={deleteNote}>
                 <Text style={styles.buttonText}>Delete</Text>
@@ -372,16 +362,16 @@ export default function App() {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* ✅ Picture Modal */}
+      {/* Picture Modal */}
       <DateImageModal
         visible={pictureModalVisible}
         date={selectedDate}
         onClose={() => {
           setPictureModalVisible(false);
-          setModalVisible(true); // reopen note modal if needed
+          setModalVisible(true);
         }}
         onImageChange={() => {
-          loadPictureDates(); // refresh calendar dots
+          loadPictureDates();
         }}
       />
     </SafeAreaView>
@@ -389,6 +379,17 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
+  dayWithPicture: { backgroundColor: '#fef9c3', borderRadius: 22 },
+// ... existing styles
+  pictureDot: {
+    position: 'absolute',
+    bottom: 4,
+    right: 4,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#ecc94b',
+  },
   container: { flex: 1, backgroundColor: '#f7fafc' },
   header: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 10, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e2e8f0' },
   headerTitle: { fontSize: 28, fontWeight: 'bold', color: '#2d3748' },
