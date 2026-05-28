@@ -260,11 +260,11 @@ export default function App() {
         </View>
         <View style={styles.legendItem}>
           <View style={[styles.legendColor, styles.legendHasNote]} />
-          <Text style={styles.legendText}>Has note + icon</Text>
+          <Text style={styles.legendText}>Note + icon</Text>
         </View>
         <View style={styles.legendItem}>
           <View style={[styles.legendColor, styles.legendHasPicture]} />
-          <Text style={styles.legendText}>Has picture only</Text>
+          <Text style={styles.legendText}>Picture only</Text>
         </View>
       </View>
 
