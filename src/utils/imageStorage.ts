@@ -90,3 +90,77 @@ export const deleteAllImagesForDate = async (date: string) => {
   delete map[date];
   await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(map));
 };
+
+// ========== VIDEO STORAGE (separate key) ==========
+const VIDEO_STORAGE_KEY = 'date_video_map';
+
+async function getVideoMap(): Promise<Record<string, string[]>> {
+  const raw = await AsyncStorage.getItem(VIDEO_STORAGE_KEY);
+  return raw ? JSON.parse(raw) : {};
+}
+
+export const getAllDatesWithVideos = async (): Promise<string[]> => {
+  const map = await getVideoMap();
+  return Object.keys(map).filter(date => map[date].length > 0);
+};
+
+export const getVideosForDate = async (date: string): Promise<string[]> => {
+  const map = await getVideoMap();
+  const uris = map[date] || [];
+  const existing = [];
+  for (const uri of uris) {
+    const info = await FileSystem.getInfoAsync(uri);
+    if (info.exists) existing.push(uri);
+  }
+  return existing;
+};
+
+async function copyVideoToLocalDirectory(sourceUri: string, destinationUri: string): Promise<void> {
+  // Same logic as copyImageToLocalDirectory – works for any file type
+  if (sourceUri.startsWith('file://')) {
+    await FileSystem.copyAsync({ from: sourceUri, to: destinationUri });
+    return;
+  }
+  const base64 = await FileSystem.readAsStringAsync(sourceUri, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+  await FileSystem.writeAsStringAsync(destinationUri, base64, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+}
+
+export const saveVideoForDate = async (date: string, videoUri: string): Promise<string> => {
+  await initImagesDirectory(); // reuse the same directory, but you could create a separate one
+  let extension = 'mp4';
+  if (videoUri.includes('.')) {
+    const ext = videoUri.split('.').pop()?.toLowerCase() || 'mp4';
+    if (['mp4', 'mov', 'm4v'].includes(ext)) extension = ext;
+  }
+  const timestamp = Date.now();
+  const newUri = `${getImagesDir()}${date}_video_${timestamp}.${extension}`;
+  await copyVideoToLocalDirectory(videoUri, newUri);
+  const map = await getVideoMap();
+  if (!map[date]) map[date] = [];
+  map[date].push(newUri);
+  await AsyncStorage.setItem(VIDEO_STORAGE_KEY, JSON.stringify(map));
+  return newUri;
+};
+
+export const deleteVideo = async (date: string, videoUri: string) => {
+  const map = await getVideoMap();
+  const uris = map[date] || [];
+  await FileSystem.deleteAsync(videoUri, { idempotent: true });
+  map[date] = uris.filter(uri => uri !== videoUri);
+  if (map[date].length === 0) delete map[date];
+  await AsyncStorage.setItem(VIDEO_STORAGE_KEY, JSON.stringify(map));
+};
+
+export const deleteAllVideosForDate = async (date: string) => {
+  const map = await getVideoMap();
+  const uris = map[date] || [];
+  for (const uri of uris) {
+    await FileSystem.deleteAsync(uri, { idempotent: true });
+  }
+  delete map[date];
+  await AsyncStorage.setItem(VIDEO_STORAGE_KEY, JSON.stringify(map));
+};
