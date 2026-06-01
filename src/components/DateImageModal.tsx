@@ -1,3 +1,4 @@
+import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
@@ -10,7 +11,12 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { deleteAllImagesForDate, deleteImage, getImagesForDate, saveImageForDate } from '../utils/imageStorage';
+import {
+  deleteAllImagesForDate,
+  deleteImage,
+  getImagesForDate,
+  saveImageForDate,
+} from '../utils/imageStorage';
 
 interface Props {
   visible: boolean;
@@ -46,51 +52,55 @@ export default function DateImageModal({ visible, date, onClose, onImageChange }
 
   const pickImage = async (useCamera: boolean) => {
     try {
-      const permission = useCamera
-        ? await ImagePicker.requestCameraPermissionsAsync()
-        : await ImagePicker.requestMediaLibraryPermissionsAsync();
-
-      if (!permission.granted) {
-        Alert.alert('Permission needed', `Please allow access to ${useCamera ? 'camera' : 'gallery'}.`);
-        return;
+      if (useCamera) {
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permission needed', 'Camera access is required.');
+          return;
+        }
+        const result = await ImagePicker.launchCameraAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          quality: 0.8,
+        });
+        if (!result.canceled && result.assets?.[0]?.uri) {
+          setPendingUri(result.assets[0].uri);
+        } else {
+          Alert.alert('Camera', 'No image captured.');
+        }
+      } else {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permission needed', 'Gallery access is required.');
+          return;
+        }
+        const result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          quality: 0.8,
+        });
+        if (!result.canceled && result.assets?.[0]?.uri) {
+          setPendingUri(result.assets[0].uri);
+        }
       }
-
-      const options: ImagePicker.ImagePickerOptions = {
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.8,
-        allowsEditing: useCamera ? false : true,
-        aspect: [4, 3],
-      };
-
-      const result = useCamera
-        ? await ImagePicker.launchCameraAsync(options)
-        : await ImagePicker.launchImageLibraryAsync(options);
-
-      if (result.canceled) return;
-
-      const asset = result.assets?.[0];
-      if (!asset?.uri) {
-        Alert.alert('Error', 'No image captured.');
-        return;
-      }
-
-      setPendingUri(asset.uri);
     } catch (error: any) {
+      console.error('Pick error:', error);
       Alert.alert('Error', error.message);
     }
   };
 
   const confirmSave = async () => {
     if (!pendingUri) return;
-    
     try {
       setLoading(true);
       await saveImageForDate(date, pendingUri);
+      if (pendingUri.includes(FileSystem.cacheDirectory || '')) {
+        await FileSystem.deleteAsync(pendingUri, { idempotent: true });
+      }
       setPendingUri(null);
       await loadImages();
       onImageChange?.();
       Alert.alert('✅ Saved!', 'Picture added to this date.');
     } catch (error: any) {
+      console.error('Save error:', error);
       Alert.alert('Error', `Failed to save: ${error.message}`);
     } finally {
       setLoading(false);
@@ -136,7 +146,7 @@ export default function DateImageModal({ visible, date, onClose, onImageChange }
     ]);
   };
 
-  // PREVIEW MODE
+  // Preview Modal
   if (pendingUri) {
     return (
       <Modal visible={visible} animationType="slide" transparent onRequestClose={() => setPendingUri(null)}>
@@ -147,10 +157,10 @@ export default function DateImageModal({ visible, date, onClose, onImageChange }
             <Text style={styles.previewText}>Save this picture for {date}?</Text>
             <View style={styles.actionRow}>
               <TouchableOpacity style={[styles.actionBtn, styles.retakeBtn]} onPress={() => setPendingUri(null)}>
-                <Text style={styles.actionText}>🔄 Retake</Text>
+                <Text style={styles.actionText}>🔄 Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.actionBtn, styles.saveBtn]} onPress={confirmSave}>
-                <Text style={styles.actionText}>💾 Save</Text>
+              <TouchableOpacity style={[styles.actionBtn, styles.saveBtn]} onPress={confirmSave} disabled={loading}>
+                <Text style={styles.actionText}>{loading ? 'Saving...' : '💾 Save'}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -159,7 +169,7 @@ export default function DateImageModal({ visible, date, onClose, onImageChange }
     );
   }
 
-  // GALLERY MODE
+  // Main Gallery Modal
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.overlay}>
@@ -216,153 +226,32 @@ export default function DateImageModal({ visible, date, onClose, onImageChange }
 }
 
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 16,
-  },
-  content: {
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    padding: 20,
-    width: '100%',
-    maxHeight: '90%',
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#2d3748',
-    textAlign: 'center',
-    marginBottom: 4,
-  },
-  countText: {
-    fontSize: 14,
-    color: '#a0aec0',
-    textAlign: 'center',
-    marginBottom: 12,
-  },
-  imageList: {
-    maxHeight: 220,
-    marginBottom: 12,
-  },
-  singleImage: {
-    alignItems: 'center',
-  },
-  multipleImages: {
-    paddingHorizontal: 4,
-    gap: 8,
-  },
-  imageWrapper: {
-    position: 'relative',
-    marginRight: 8,
-  },
-  singleImageView: {
-    width: 280,
-    height: 200,
-    borderRadius: 12,
-    backgroundColor: '#f7fafc',
-  },
-  thumbnail: {
-    width: 160,
-    height: 160,
-    borderRadius: 12,
-    backgroundColor: '#f7fafc',
-  },
-  deleteIcon: {
-    position: 'absolute',
-    top: 4,
-    right: 4,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  deleteIconText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  loading: {
-    fontSize: 16,
-    color: '#718096',
-    textAlign: 'center',
-    marginVertical: 20,
-  },
-  emptyState: {
-    paddingVertical: 40,
-    alignItems: 'center',
-  },
-  emptyText: {
-    fontSize: 16,
-    color: '#a0aec0',
-  },
-  previewImage: {
-    width: '100%',
-    height: 280,
-    borderRadius: 12,
-    backgroundColor: '#f7fafc',
-    marginBottom: 16,
-  },
-  previewText: {
-    fontSize: 16,
-    color: '#4a5568',
-    marginBottom: 16,
-    textAlign: 'center',
-  },
-  deleteAllBtn: {
-    backgroundColor: '#fed7d7',
-    paddingVertical: 10,
-    borderRadius: 10,
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  deleteAllText: {
-    color: '#c53030',
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  actionRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 10,
-  },
-  actionBtn: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  galleryBtn: {
-    backgroundColor: '#4299e1',
-  },
-  cameraBtn: {
-    backgroundColor: '#48bb78',
-  },
-  retakeBtn: {
-    backgroundColor: '#a0aec0',
-  },
-  saveBtn: {
-    backgroundColor: '#48bb78',
-  },
-  actionText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 14,
-  },
-  closeBtn: {
-    width: '100%',
-    paddingVertical: 12,
-    borderRadius: 12,
-    backgroundColor: '#edf2f7',
-    alignItems: 'center',
-  },
-  closeText: {
-    color: '#4a5568',
-    fontWeight: '600',
-    fontSize: 14,
-  },
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 16 },
+  content: { backgroundColor: '#fff', borderRadius: 20, padding: 20, width: '100%', maxHeight: '90%' },
+  title: { fontSize: 20, fontWeight: 'bold', color: '#2d3748', textAlign: 'center', marginBottom: 4 },
+  countText: { fontSize: 14, color: '#a0aec0', textAlign: 'center', marginBottom: 12 },
+  imageList: { maxHeight: 220, marginBottom: 12 },
+  singleImage: { alignItems: 'center' },
+  multipleImages: { paddingHorizontal: 4, gap: 8 },
+  imageWrapper: { position: 'relative', marginRight: 8 },
+  singleImageView: { width: 280, height: 200, borderRadius: 12, backgroundColor: '#f7fafc' },
+  thumbnail: { width: 160, height: 160, borderRadius: 12, backgroundColor: '#f7fafc' },
+  deleteIcon: { position: 'absolute', top: 4, right: 4, backgroundColor: 'rgba(0,0,0,0.6)', width: 28, height: 28, borderRadius: 14, justifyContent: 'center', alignItems: 'center' },
+  deleteIconText: { color: '#fff', fontSize: 14, fontWeight: 'bold' },
+  loading: { fontSize: 16, color: '#718096', textAlign: 'center', marginVertical: 20 },
+  emptyState: { paddingVertical: 40, alignItems: 'center' },
+  emptyText: { fontSize: 16, color: '#a0aec0' },
+  previewImage: { width: '100%', height: 280, borderRadius: 12, backgroundColor: '#f7fafc', marginBottom: 16 },
+  previewText: { fontSize: 16, color: '#4a5568', marginBottom: 16, textAlign: 'center' },
+  deleteAllBtn: { backgroundColor: '#fed7d7', paddingVertical: 10, borderRadius: 10, alignItems: 'center', marginBottom: 12 },
+  deleteAllText: { color: '#c53030', fontWeight: '600', fontSize: 14 },
+  actionRow: { flexDirection: 'row', gap: 10, marginBottom: 10 },
+  actionBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
+  galleryBtn: { backgroundColor: '#4299e1' },
+  cameraBtn: { backgroundColor: '#48bb78' },
+  retakeBtn: { backgroundColor: '#a0aec0' },
+  saveBtn: { backgroundColor: '#48bb78' },
+  actionText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
+  closeBtn: { width: '100%', paddingVertical: 12, borderRadius: 12, backgroundColor: '#edf2f7', alignItems: 'center' },
+  closeText: { color: '#4a5568', fontWeight: '600', fontSize: 14 },
 });

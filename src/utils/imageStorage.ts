@@ -6,12 +6,9 @@ let IMAGES_DIR: string | null = null;
 
 export const initImagesDirectory = async (): Promise<string> => {
   if (IMAGES_DIR) return IMAGES_DIR;
-
   const documentDir = FileSystem.documentDirectory;
   if (!documentDir) throw new Error('Document directory not available');
-
   IMAGES_DIR = `${documentDir}note_images/`;
-
   const dirInfo = await FileSystem.getInfoAsync(IMAGES_DIR);
   if (!dirInfo.exists) {
     await FileSystem.makeDirectoryAsync(IMAGES_DIR, { intermediates: true });
@@ -37,8 +34,6 @@ export const getAllDatesWithImages = async (): Promise<string[]> => {
 export const getImagesForDate = async (date: string): Promise<string[]> => {
   const map = await getImageMap();
   const uris = map[date] || [];
-  
-  // Filter out deleted files
   const existing = [];
   for (const uri of uris) {
     const info = await FileSystem.getInfoAsync(uri);
@@ -47,42 +42,51 @@ export const getImagesForDate = async (date: string): Promise<string[]> => {
   return existing;
 };
 
+async function copyImageToLocalDirectory(sourceUri: string, destinationUri: string): Promise<void> {
+  if (sourceUri.startsWith('file://')) {
+    await FileSystem.copyAsync({ from: sourceUri, to: destinationUri });
+    return;
+  }
+  const base64 = await FileSystem.readAsStringAsync(sourceUri, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+  await FileSystem.writeAsStringAsync(destinationUri, base64, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+}
+
 export const saveImageForDate = async (date: string, imageUri: string): Promise<string> => {
   await initImagesDirectory();
-  const extension = imageUri.split('.').pop()?.toLowerCase() || 'jpg';
+  let extension = 'jpg';
+  if (imageUri.includes('.')) {
+    const ext = imageUri.split('.').pop()?.toLowerCase() || 'jpg';
+    if (['jpg', 'jpeg', 'png', 'heic'].includes(ext)) extension = ext;
+  }
   const timestamp = Date.now();
   const newUri = `${getImagesDir()}${date}_${timestamp}.${extension}`;
-
-  await FileSystem.copyAsync({ from: imageUri, to: newUri });
-
+  await copyImageToLocalDirectory(imageUri, newUri);
   const map = await getImageMap();
   if (!map[date]) map[date] = [];
   map[date].push(newUri);
   await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(map));
-
   return newUri;
 };
 
 export const deleteImage = async (date: string, imageUri: string) => {
   const map = await getImageMap();
   const uris = map[date] || [];
-  
   await FileSystem.deleteAsync(imageUri, { idempotent: true });
-  
   map[date] = uris.filter(uri => uri !== imageUri);
   if (map[date].length === 0) delete map[date];
-  
   await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(map));
 };
 
 export const deleteAllImagesForDate = async (date: string) => {
   const map = await getImageMap();
   const uris = map[date] || [];
-  
   for (const uri of uris) {
     await FileSystem.deleteAsync(uri, { idempotent: true });
   }
-  
   delete map[date];
   await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(map));
 };
