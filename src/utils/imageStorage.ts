@@ -164,3 +164,11 @@ export const deleteAllVideosForDate = async (date: string) => {
   delete map[date];
   await AsyncStorage.setItem(VIDEO_STORAGE_KEY, JSON.stringify(map));
 };
+
+export const getAllDatesWithMedia = async (): Promise<string[]> => {
+  const imageDates = await getAllDatesWithImages();
+  const videoDates = await getAllDatesWithVideos();
+  // Combine and remove duplicates
+  const combined = [...new Set([...imageDates, ...videoDates])];
+  return combined;
+};
