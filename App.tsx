@@ -1,5 +1,4 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import { memo, useEffect, useState } from 'react';
 import {
   Alert,
@@ -17,7 +16,6 @@ import {
 import { Calendar } from 'react-native-calendars';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 
-// Utils
 import DateImageModal from './src/components/DateImageModal';
 import { getAllDatesWithMedia } from './src/utils/imageStorage';
 import {
@@ -29,7 +27,9 @@ import {
 
 setupNotificationHandler();
 
-// ---------- Custom Day Component ----------
+const STORAGE_KEY = 'calendar_notes_v4';
+
+// Custom Day Component
 const CustomDay = memo(
   ({ date, state, onPress, notes, mediaDates }: any) => {
     const dateString = date.dateString;
@@ -41,14 +41,9 @@ const CustomDay = memo(
     let containerStyle = styles.dayContainer;
     let textStyle = styles.dayText;
 
-    if (hasNote) {
-      containerStyle = { ...containerStyle, ...styles.dayWithNote };
-    } else if (hasMedia) {
-      containerStyle = { ...containerStyle, ...styles.dayWithMedia };
-    }
-    if (state === 'disabled') {
-      textStyle = { ...textStyle, ...styles.disabledDayText };
-    }
+    if (hasNote) containerStyle = { ...containerStyle, ...styles.dayWithNote };
+    else if (hasMedia) containerStyle = { ...containerStyle, ...styles.dayWithMedia };
+    if (state === 'disabled') textStyle = { ...textStyle, ...styles.disabledDayText };
 
     return (
       <TouchableOpacity style={containerStyle} onPress={() => onPress(date)} activeOpacity={0.7}>
@@ -59,13 +54,10 @@ const CustomDay = memo(
       </TouchableOpacity>
     );
   },
-  (prevProps, nextProps) => {
-    return (
-      prevProps.notes[prevProps.date.dateString] === nextProps.notes[nextProps.date.dateString] &&
-      prevProps.mediaDates?.includes(prevProps.date.dateString) ===
-        nextProps.mediaDates?.includes(nextProps.date.dateString)
-    );
-  }
+  (prevProps, nextProps) =>
+    prevProps.notes[prevProps.date.dateString] === nextProps.notes[nextProps.date.dateString] &&
+    prevProps.mediaDates?.includes(prevProps.date.dateString) ===
+      nextProps.mediaDates?.includes(nextProps.date.dateString)
 );
 
 export default function App() {
@@ -76,71 +68,72 @@ export default function App() {
   const [selectedIcon, setSelectedIcon] = useState('📝');
   const [alarmDate, setAlarmDate] = useState<Date | null>(null);
   const [isDatePickerVisible, setDatePickerVisibility] = useState(false);
-  const [showDatePicker, setShowDatePicker] = useState(false);
   const [mediaModalVisible, setMediaModalVisible] = useState(false);
   const [mediaDates, setMediaDates] = useState<string[]>([]);
 
-  const showDatePickerModal = () => setDatePickerVisibility(true);
-  const hideDatePickerModal = () => setDatePickerVisibility(false);
-
   const loadMediaDates = async () => {
-    const dates = await getAllDatesWithMedia();
-    setMediaDates(dates);
+    try {
+      const dates = await getAllDatesWithMedia();
+      setMediaDates(dates);
+    } catch (error) {
+      console.error('Failed to load media dates:', error);
+    }
+  };
+
+  // ---------- PERSISTENCE (AsyncStorage) ----------
+  const saveNotes = async (newNotes: typeof notes) => {
+    try {
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(newNotes));
+      console.log('✅ Notes saved:', newNotes);
+    } catch (error) {
+      console.error('Save failed:', error);
+    }
   };
 
   const loadNotes = async () => {
     try {
-      const stored = await AsyncStorage.getItem('calendar_notes');
+      const stored = await AsyncStorage.getItem(STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
+        console.log('📦 Loaded notes:', parsed);
         setNotes(parsed);
+        // Re‑schedule alarms
         for (const [date, data] of Object.entries(parsed) as any[]) {
           if (data.alarm && data.alarm > Date.now()) {
             await scheduleNotification(date, data.alarm, data.text, data.icon);
           }
         }
+      } else {
+        console.log('No notes found.');
       }
     } catch (error) {
-      console.error('Failed to load notes:', error);
-    }
-  };
-
-  const saveNotes = async (notesToSave: any) => {
-    try {
-      await AsyncStorage.setItem('calendar_notes', JSON.stringify(notesToSave));
-    } catch (error) {
-      console.error('Failed to save notes:', error);
+      console.error('Load failed:', error);
     }
   };
 
   useEffect(() => {
-    const initialize = async () => {
+    const init = async () => {
       await registerForNotifications();
       await loadNotes();
       await loadMediaDates();
     };
-    initialize();
+    init();
   }, []);
 
+  // Auto‑save when notes change (backup)
   useEffect(() => {
-    saveNotes(notes);
+    if (Object.keys(notes).length >= 0) saveNotes(notes);
   }, [notes]);
 
+  // Always open note modal (no media‑only bypass)
   const onDayPress = (day: any) => {
     const dateString = day.dateString;
     const existing = notes[dateString];
-    const hasMedia = mediaDates.includes(dateString);
-
     setSelectedDate(dateString);
-
-    if (hasMedia && !existing) {
-      setMediaModalVisible(true);
-    } else {
-      setNoteText(existing?.text || '');
-      setSelectedIcon(existing?.icon || '📝');
-      setAlarmDate(existing?.alarm ? new Date(existing.alarm) : null);
-      setModalVisible(true);
-    }
+    setNoteText(existing?.text || '');
+    setSelectedIcon(existing?.icon || '📝');
+    setAlarmDate(existing?.alarm ? new Date(existing.alarm) : null);
+    setModalVisible(true);
   };
 
   const saveNote = async () => {
@@ -157,14 +150,12 @@ export default function App() {
         icon: selectedIcon,
         alarm: alarmTimestamp,
       };
-      if (alarmTimestamp) {
-        await scheduleNotification(selectedDate, alarmTimestamp, trimmed || '', selectedIcon);
-      } else {
-        await cancelNotification(selectedDate);
-      }
+      if (alarmTimestamp) await scheduleNotification(selectedDate, alarmTimestamp, trimmed || '', selectedIcon);
+      else await cancelNotification(selectedDate);
     }
 
     setNotes(updatedNotes);
+    await saveNotes(updatedNotes); // immediate write
     setModalVisible(false);
     resetForm();
   };
@@ -175,6 +166,7 @@ export default function App() {
       const updatedNotes = { ...notes };
       delete updatedNotes[selectedDate];
       setNotes(updatedNotes);
+      await saveNotes(updatedNotes);
       Alert.alert('Deleted', 'Note and alarm removed');
       setModalVisible(false);
       resetForm();
@@ -194,12 +186,8 @@ export default function App() {
 
   const getMarkedDates = () => {
     const marked: any = {};
-    Object.keys(notes).forEach((date) => {
-      marked[date] = {
-        customStyles: {
-          container: { backgroundColor: '#c6f6d5', borderRadius: 20 },
-        },
-      };
+    Object.keys(notes).forEach(date => {
+      marked[date] = { customStyles: { container: { backgroundColor: '#c6f6d5', borderRadius: 20 } } };
     });
     return marked;
   };
@@ -225,9 +213,7 @@ export default function App() {
         onDayPress={onDayPress}
         markingType="custom"
         markedDates={getMarkedDates()}
-        dayComponent={(props) => (
-          <CustomDay {...props} onPress={onDayPress} notes={notes} mediaDates={mediaDates} />
-        )}
+        dayComponent={(props) => <CustomDay {...props} onPress={onDayPress} notes={notes} mediaDates={mediaDates} />}
         theme={{
           calendarBackground: '#ffffff',
           monthTextColor: '#2d3748',
@@ -240,18 +226,9 @@ export default function App() {
 
       {/* Legend */}
       <View style={styles.legendContainer}>
-        <View style={styles.legendItem}>
-          <View style={[styles.legendColor, styles.legendNormal]} />
-          <Text style={styles.legendText}>No note</Text>
-        </View>
-        <View style={styles.legendItem}>
-          <View style={[styles.legendColor, styles.legendHasNote]} />
-          <Text style={styles.legendText}>Note + icon</Text>
-        </View>
-        <View style={styles.legendItem}>
-          <View style={[styles.legendColor, styles.legendHasMedia]} />
-          <Text style={styles.legendText}>Picture / video only</Text>
-        </View>
+        <View style={styles.legendItem}><View style={[styles.legendColor, styles.legendNormal]} /><Text style={styles.legendText}>No note</Text></View>
+        <View style={styles.legendItem}><View style={[styles.legendColor, styles.legendHasNote]} /><Text style={styles.legendText}>Note + icon</Text></View>
+        <View style={styles.legendItem}><View style={[styles.legendColor, styles.legendHasMedia]} /><Text style={styles.legendText}>Picture / video only</Text></View>
       </View>
 
       {/* Note Modal */}
@@ -264,101 +241,39 @@ export default function App() {
                 <Text style={styles.closeButtonText}>✕</Text>
               </TouchableOpacity>
             </View>
-
             <Text style={styles.selectedDateText}>{formatDateHeader(selectedDate)}</Text>
 
             <Text style={styles.label}>Select icon:</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.iconRow}>
-              {iconOptions.map((icon) => (
-                <TouchableOpacity
-                  key={icon}
-                  style={[styles.iconButton, selectedIcon === icon && styles.iconSelected]}
-                  onPress={() => setSelectedIcon(icon)}
-                >
+              {iconOptions.map(icon => (
+                <TouchableOpacity key={icon} style={[styles.iconButton, selectedIcon === icon && styles.iconSelected]} onPress={() => setSelectedIcon(icon)}>
                   <Text style={styles.iconText}>{icon}</Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
 
-            <TextInput
-              style={styles.noteInput}
-              multiline
-              placeholder="Write something about this day..."
-              placeholderTextColor="#a0aec0"
-              value={noteText}
-              onChangeText={setNoteText}
-              textAlignVertical="top"
-            />
+            <TextInput style={styles.noteInput} multiline placeholder="Write something about this day..." placeholderTextColor="#a0aec0" value={noteText} onChangeText={setNoteText} textAlignVertical="top" />
 
-            <TouchableOpacity
-              style={styles.pictureButton}
-              onPress={() => {
-                setModalVisible(false);
-                setMediaModalVisible(true);
-              }}
-            >
+            <TouchableOpacity style={styles.pictureButton} onPress={() => { setModalVisible(false); setMediaModalVisible(true); }}>
               <Text style={styles.pictureButtonText}>📷 Manage Picture / Video for this Date</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.alarmButton} onPress={showDatePickerModal}>
-              <Text style={styles.alarmButtonText}>
-                {alarmDate ? `⏰ Alarm: ${alarmDate.toLocaleString()}` : '🔔 Set reminder (optional)'}
-              </Text>
+            <TouchableOpacity style={styles.alarmButton} onPress={() => setDatePickerVisibility(true)}>
+              <Text style={styles.alarmButtonText}>{alarmDate ? `⏰ Alarm: ${alarmDate.toLocaleString()}` : '🔔 Set reminder (optional)'}</Text>
             </TouchableOpacity>
+            {alarmDate && <TouchableOpacity style={styles.clearAlarmButton} onPress={() => setAlarmDate(null)}><Text style={styles.clearAlarmText}>Clear alarm</Text></TouchableOpacity>}
 
-            {alarmDate && (
-              <TouchableOpacity style={styles.clearAlarmButton} onPress={() => setAlarmDate(null)}>
-                <Text style={styles.clearAlarmText}>Clear alarm</Text>
-              </TouchableOpacity>
-            )}
-
-            <DateTimePickerModal
-              isVisible={isDatePickerVisible}
-              mode="datetime"
-              onConfirm={(date) => {
-                setAlarmDate(date);
-                hideDatePickerModal();
-              }}
-              onCancel={hideDatePickerModal}
-              minimumDate={new Date()}
-            />
-
-            {showDatePicker && (
-              <DateTimePicker
-                value={alarmDate || new Date()}
-                mode="datetime"
-                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                onChange={(event, selectedDate) => {
-                  setShowDatePicker(false);
-                  if (selectedDate) setAlarmDate(selectedDate);
-                }}
-              />
-            )}
+            <DateTimePickerModal isVisible={isDatePickerVisible} mode="datetime" onConfirm={date => { setAlarmDate(date); setDatePickerVisibility(false); }} onCancel={() => setDatePickerVisibility(false)} minimumDate={new Date()} />
 
             <View style={styles.modalButtons}>
-              <TouchableOpacity style={[styles.button, styles.deleteButton]} onPress={deleteNote}>
-                <Text style={styles.buttonText}>Delete</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.button, styles.saveButton]} onPress={saveNote}>
-                <Text style={styles.buttonText}>Save</Text>
-              </TouchableOpacity>
+              <TouchableOpacity style={[styles.button, styles.deleteButton]} onPress={deleteNote}><Text style={styles.buttonText}>Delete</Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.button, styles.saveButton]} onPress={saveNote}><Text style={styles.buttonText}>Save</Text></TouchableOpacity>
             </View>
           </View>
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* Picture/Video Modal */}
-      <DateImageModal
-        visible={mediaModalVisible}
-        date={selectedDate}
-        onClose={() => {
-          setMediaModalVisible(false);
-          setModalVisible(true);
-        }}
-        onImageChange={() => {
-          loadMediaDates();
-        }}
-      />
+      <DateImageModal visible={mediaModalVisible} date={selectedDate} onClose={() => { setMediaModalVisible(false); setModalVisible(true); }} onImageChange={loadMediaDates} />
     </SafeAreaView>
   );
 }
@@ -374,15 +289,7 @@ const styles = StyleSheet.create({
   dayWithMedia: { backgroundColor: '#fef9c3', borderRadius: 22 },
   disabledDayText: { color: '#cbd5e0' },
   dayIcon: { fontSize: 12, position: 'absolute', bottom: 2, right: 2 },
-  mediaDot: {
-    position: 'absolute',
-    bottom: 4,
-    right: 4,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#ecc94b',
-  },
+  mediaDot: { position: 'absolute', bottom: 4, right: 4, width: 8, height: 8, borderRadius: 4, backgroundColor: '#ecc94b' },
   legendContainer: { flexDirection: 'row', justifyContent: 'center', paddingVertical: 12, backgroundColor: '#fff', marginTop: 10, marginHorizontal: 16, borderRadius: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 2 },
   legendItem: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 12 },
   legendColor: { width: 20, height: 20, borderRadius: 10, marginRight: 6 },
