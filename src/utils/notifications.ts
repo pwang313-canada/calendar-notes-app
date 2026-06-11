@@ -26,20 +26,6 @@ export const registerForNotifications = async (): Promise<boolean> => {
 
   if (Platform.OS === 'android') {
     const isExpoGo = Constants.appOwnership === 'expo';
-    Alert.alert(
-      '⚠️ Important for reliable reminders',
-      'Android may delay notifications to save battery.\n\n' +
-      'To ensure on‑time reminders:\n' +
-      '• Go to Settings → Apps → Calendar Notes → Battery\n' +
-      '• Select "Unrestricted" or "Don\'t optimize"\n\n' +
-      (isExpoGo ? '(Expo Go cannot open battery settings directly)' : 'Tap "Open Settings" below to change it now.'),
-      isExpoGo
-        ? [{ text: 'OK' }]
-        : [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Open Settings', onPress: () => openBatterySettings() }
-          ]
-    );
   }
 
   if (Platform.OS === 'android' && Constants.appOwnership === 'expo') {

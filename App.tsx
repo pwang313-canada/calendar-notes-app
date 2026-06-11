@@ -71,6 +71,7 @@ export default function App() {
   const [mediaModalVisible, setMediaModalVisible] = useState(false);
   const [mediaDates, setMediaDates] = useState<string[]>([]);
 
+  const [isLoaded, setIsLoaded] = useState(false)
   const loadMediaDates = async () => {
     try {
       const dates = await getAllDatesWithMedia();
@@ -120,10 +121,6 @@ export default function App() {
     init();
   }, []);
 
-  // Auto‑save when notes change (backup)
-  useEffect(() => {
-    if (Object.keys(notes).length >= 0) saveNotes(notes);
-  }, [notes]);
 
   // Always open note modal (no media‑only bypass)
   const onDayPress = (day: any) => {
