@@ -1,50 +1,43 @@
-# Welcome to your Expo app 👋
+# Calendar Notes 📅
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+A React Native (Expo) app for attaching notes, icons, reminders, and pictures/videos to calendar dates.
+
+## Features
+
+- **Calendar view** — tap any date to add a note with an emoji icon
+- **Reminders** — optional date/time alarm per note via local notifications
+- **Media per date** — attach pictures and short videos (≤ 20s) from camera or gallery; full-screen viewer included
+- **Offline-first** — notes in AsyncStorage, media copied to the app's document directory
 
 ## Get started
 
-1. Install dependencies
-
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
 ```bash
-npm run reset-project
+npm install
+npx expo start
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+> After pulling the refactored project, run `npx expo install --fix` once so
+> `package-lock.json` picks up the cleaned-up dependency list.
 
-## Learn more
+## Project structure
 
-To learn more about developing your project with Expo, look at the following resources:
+```
+App.tsx                  # Calendar screen, note editor modal, alarm scheduling
+app/index.tsx            # expo-router entry (renders App)
+src/components/
+  DateImageModal.tsx     # Picture/video manager + full-screen viewer
+src/utils/
+  imageStorage.ts        # Media files <-> AsyncStorage index
+  notifications.ts       # Local notification scheduling
+assets/                  # Icons, splash
+PRIVACY.html             # Privacy policy (for store listing)
+```
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+## Notes for developers
 
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+- `babel.config.js` is required — the project will not build without it.
+- Android alarm delivery: `SCHEDULE_EXACT_ALARM` is declared in `app.json`.
+  On Android 12+ the user must grant "Alarms & reminders" in system settings
+  for exact-time delivery.
+- `expo-av` (video playback) is deprecated upstream in favor of `expo-video`;
+  it still works on this SDK but plan a migration before the next major upgrade.

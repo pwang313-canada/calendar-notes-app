@@ -1,7 +1,7 @@
-import { ResizeMode, Video } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
-import React, { useCallback, useEffect, useState } from 'react';
+import { VideoView, useVideoPlayer } from 'expo-video';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -28,6 +28,50 @@ interface Props {
   date: string;
   onClose: () => void;
   onImageChange?: () => void;
+}
+
+// Small wrappers so each video gets its own player via hooks
+function PreviewVideo({ uri }: { uri: string }) {
+  const player = useVideoPlayer(uri, (p) => {
+    p.loop = true;
+  });
+  return (
+    <VideoView
+      style={styles.previewVideo}
+      player={player}
+      contentFit="contain"
+      nativeControls
+    />
+  );
+}
+
+function VideoThumbnail({ uri }: { uri: string }) {
+  const player = useVideoPlayer(uri, (p) => {
+    p.loop = true;
+  });
+  return (
+    <VideoView
+      style={styles.thumbnail}
+      player={player}
+      contentFit="cover"
+      nativeControls={false}
+    />
+  );
+}
+
+function ViewerVideo({ uri }: { uri: string }) {
+  const player = useVideoPlayer(uri, (p) => {
+    p.loop = false;
+    p.play();
+  });
+  return (
+    <VideoView
+      style={styles.fullscreenVideo}
+      player={player}
+      contentFit="contain"
+      nativeControls
+    />
+  );
 }
 
 export default function DateImageModal({ visible, date, onClose, onImageChange }: Props) {
@@ -75,85 +119,38 @@ export default function DateImageModal({ visible, date, onClose, onImageChange }
     return true;
   };
 
-  const pickImage = async (useCamera: boolean) => {
+  const pickMedia = async (kind: 'image' | 'video', useCamera: boolean) => {
     try {
-      if (useCamera) {
-        const { status } = await ImagePicker.requestCameraPermissionsAsync();
-        if (status !== 'granted') {
-          Alert.alert('Permission needed', 'Camera access is required.');
-          return;
-        }
-        const result = await ImagePicker.launchCameraAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
-          quality: 0.8,
-        });
-        if (!result.canceled && result.assets?.[0]?.uri) {
-          setPendingUri(result.assets[0].uri);
-          setPendingType('image');
-        } else {
-          Alert.alert('Camera', 'No image captured.');
-        }
-      } else {
-        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (status !== 'granted') {
-          Alert.alert('Permission needed', 'Gallery access is required.');
-          return;
-        }
-        const result = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
-          quality: 0.8,
-        });
-        if (!result.canceled && result.assets?.[0]?.uri) {
-          setPendingUri(result.assets[0].uri);
-          setPendingType('image');
-        }
+      const { status } = useCamera
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(
+          'Permission needed',
+          useCamera ? 'Camera access is required.' : 'Gallery access is required.',
+        );
+        return;
       }
+      const mediaTypes =
+        kind === 'image' ? ImagePicker.MediaTypeOptions.Images : ImagePicker.MediaTypeOptions.Videos;
+      const options = {
+        mediaTypes,
+        quality: 0.8,
+        ...(kind === 'video' && useCamera ? { videoMaxDuration: 20 } : {}),
+      };
+      const result = useCamera
+        ? await ImagePicker.launchCameraAsync(options)
+        : await ImagePicker.launchImageLibraryAsync(options);
+      const asset = !result.canceled ? result.assets?.[0] : undefined;
+      if (!asset?.uri) {
+        if (useCamera) Alert.alert('Camera', `No ${kind} captured.`);
+        return;
+      }
+      if (kind === 'video' && !checkDuration(asset.duration)) return;
+      setPendingUri(asset.uri);
+      setPendingType(kind);
     } catch (error: any) {
       console.error('Pick error:', error);
-      Alert.alert('Error', error.message);
-    }
-  };
-
-  const pickVideo = async (useCamera: boolean) => {
-    try {
-      if (useCamera) {
-        const { status } = await ImagePicker.requestCameraPermissionsAsync();
-        if (status !== 'granted') {
-          Alert.alert('Permission needed', 'Camera access is required.');
-          return;
-        }
-        const result = await ImagePicker.launchCameraAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-          videoMaxDuration: 20, // Changed from 10 to 20
-          quality: 0.8,
-        });
-        if (!result.canceled && result.assets?.[0]?.uri) {
-          setPendingUri(result.assets[0].uri);
-          setPendingType('video');
-        } else {
-          Alert.alert('Camera', 'No video captured.');
-        }
-      } else {
-        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (status !== 'granted') {
-          Alert.alert('Permission needed', 'Gallery access is required.');
-          return;
-        }
-        const result = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-          quality: 0.8,
-        });
-        if (!result.canceled && result.assets?.[0]) {
-          const asset = result.assets[0];
-          if (!checkDuration(asset.duration)) return;
-          if (asset.uri) {
-            setPendingUri(asset.uri);
-            setPendingType('video');
-          }
-        }
-      }
-    } catch (error: any) {
-      console.error('Pick video error:', error);
       Alert.alert('Error', error.message);
     }
   };
@@ -167,7 +164,9 @@ export default function DateImageModal({ visible, date, onClose, onImageChange }
       } else {
         await saveVideoForDate(date, pendingUri);
       }
-      if (pendingUri.includes(FileSystem.cacheDirectory || '')) {
+      // Clean up the picker's temp copy, but only when we know it lives in the cache dir
+      const cacheDir = FileSystem.cacheDirectory;
+      if (cacheDir && pendingUri.startsWith(cacheDir)) {
         await FileSystem.deleteAsync(pendingUri, { idempotent: true });
       }
       setPendingUri(null);
@@ -182,84 +181,52 @@ export default function DateImageModal({ visible, date, onClose, onImageChange }
     }
   };
 
-  // ----- Delete handlers -----
-  const handleDeleteImage = (uri: string) => {
-    Alert.alert('Delete Picture', 'Remove this picture?', [
+  const askDelete = (
+    title: string,
+    message: string,
+    confirmText: string,
+    run: () => Promise<void>,
+  ) => {
+    Alert.alert(title, message, [
       { text: 'Cancel', style: 'cancel' },
       {
-        text: 'Delete',
+        text: confirmText,
         style: 'destructive',
-        onPress: async () => {
-          try {
-            await deleteImage(date, uri);
-            await loadMedia();
-            onImageChange?.();
-          } catch (error: any) {
-            Alert.alert('Error', error.message);
-          }
+        onPress: () => {
+          run().catch((error: any) => Alert.alert('Error', error.message));
         },
       },
     ]);
   };
 
-  const handleDeleteVideo = (uri: string) => {
-    Alert.alert('Delete Video', 'Remove this video?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await deleteVideo(date, uri);
-            await loadMedia();
-            onImageChange?.();
-          } catch (error: any) {
-            Alert.alert('Error', error.message);
-          }
-        },
-      },
-    ]);
+  const removeMedia = async (kind: 'image' | 'video', uri?: string) => {
+    if (uri) {
+      if (kind === 'image') await deleteImage(date, uri);
+      else await deleteVideo(date, uri);
+    } else if (kind === 'image') {
+      await deleteAllImagesForDate(date);
+    } else {
+      await deleteAllVideosForDate(date);
+    }
+    await loadMedia();
+    onImageChange?.();
   };
 
-  const handleDeleteAllImages = () => {
-    if (images.length === 0) return;
-    Alert.alert('Delete All Pictures', `Remove all ${images.length} pictures?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete All',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await deleteAllImagesForDate(date);
-            await loadMedia();
-            onImageChange?.();
-          } catch (error: any) {
-            Alert.alert('Error', error.message);
-          }
-        },
-      },
-    ]);
-  };
+  const handleDeleteImage = (uri: string) =>
+    askDelete('Delete Picture', 'Remove this picture?', 'Delete', () => removeMedia('image', uri));
 
-  const handleDeleteAllVideos = () => {
-    if (videos.length === 0) return;
-    Alert.alert('Delete All Videos', `Remove all ${videos.length} videos?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete All',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await deleteAllVideosForDate(date);
-            await loadMedia();
-            onImageChange?.();
-          } catch (error: any) {
-            Alert.alert('Error', error.message);
-          }
-        },
-      },
-    ]);
-  };
+  const handleDeleteVideo = (uri: string) =>
+    askDelete('Delete Video', 'Remove this video?', 'Delete', () => removeMedia('video', uri));
+
+  const handleDeleteAllImages = () =>
+    askDelete('Delete All Pictures', `Remove all ${images.length} pictures?`, 'Delete All', () =>
+      removeMedia('image'),
+    );
+
+  const handleDeleteAllVideos = () =>
+    askDelete('Delete All Videos', `Remove all ${videos.length} videos?`, 'Delete All', () =>
+      removeMedia('video'),
+    );
 
   // ----- Full‑screen viewer -----
   const openViewer = (uri: string, type: 'image' | 'video') => {
@@ -278,13 +245,7 @@ export default function DateImageModal({ visible, date, onClose, onImageChange }
             {pendingType === 'image' ? (
               <Image source={{ uri: pendingUri }} style={styles.previewImage} resizeMode="contain" />
             ) : (
-              <Video
-                source={{ uri: pendingUri }}
-                style={styles.previewVideo}
-                useNativeControls
-                resizeMode={ResizeMode.CONTAIN}
-                isLooping
-              />
+              <PreviewVideo uri={pendingUri} />
             )}
             <Text style={styles.previewText}>Save this {pendingType} for {date}?</Text>
             <View style={styles.actionRow}>
@@ -347,14 +308,7 @@ export default function DateImageModal({ visible, date, onClose, onImageChange }
               renderItem={({ item }) => (
                 <View style={styles.mediaWrapper}>
                   <TouchableOpacity onPress={() => openViewer(item, 'video')}>
-                    <Video
-                      source={{ uri: item }}
-                      style={styles.thumbnail}
-                      useNativeControls={false}
-                      resizeMode={ResizeMode.COVER}
-                      isLooping
-                      shouldPlay={false}
-                    />
+                    <VideoThumbnail uri={item} />
                     <View style={styles.playIconOverlay}>
                       <Text style={styles.playIcon}>▶️</Text>
                     </View>
@@ -374,18 +328,18 @@ export default function DateImageModal({ visible, date, onClose, onImageChange }
 
             {/* Action buttons */}
             <View style={styles.actionRow}>
-              <TouchableOpacity style={[styles.actionBtn, styles.galleryBtn]} onPress={() => pickImage(false)}>
+              <TouchableOpacity style={[styles.actionBtn, styles.galleryBtn]} onPress={() => pickMedia('image', false)}>
                 <Text style={styles.actionText}>🖼️ Gallery (Image)</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.actionBtn, styles.cameraBtn]} onPress={() => pickImage(true)}>
+              <TouchableOpacity style={[styles.actionBtn, styles.cameraBtn]} onPress={() => pickMedia('image', true)}>
                 <Text style={styles.actionText}>📸 Camera (Image)</Text>
               </TouchableOpacity>
             </View>
             <View style={styles.actionRow}>
-              <TouchableOpacity style={[styles.actionBtn, styles.galleryBtn]} onPress={() => pickVideo(false)}>
+              <TouchableOpacity style={[styles.actionBtn, styles.galleryBtn]} onPress={() => pickMedia('video', false)}>
                 <Text style={styles.actionText}>🎥 Gallery (≤20s)</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.actionBtn, styles.cameraBtn]} onPress={() => pickVideo(true)}>
+              <TouchableOpacity style={[styles.actionBtn, styles.cameraBtn]} onPress={() => pickMedia('video', true)}>
                 <Text style={styles.actionText}>🎬 Camera (≤20s)</Text>
               </TouchableOpacity>
             </View>
@@ -407,14 +361,7 @@ export default function DateImageModal({ visible, date, onClose, onImageChange }
             <Image source={{ uri: viewerUri }} style={styles.fullscreenImage} resizeMode="contain" />
           )}
           {viewerType === 'video' && viewerUri && (
-            <Video
-              source={{ uri: viewerUri }}
-              style={styles.fullscreenVideo}
-              useNativeControls
-              resizeMode={ResizeMode.CONTAIN}
-              shouldPlay
-              isLooping={false}
-            />
+            <ViewerVideo uri={viewerUri} />
           )}
         </View>
       </Modal>

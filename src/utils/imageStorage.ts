@@ -1,48 +1,54 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 
-const STORAGE_KEY = 'date_image_map';
-let IMAGES_DIR: string | null = null;
+type MediaKind = 'image' | 'video';
+
+const STORAGE_KEYS: Record<MediaKind, string> = {
+  image: 'date_image_map',
+  video: 'date_video_map',
+};
+
+const ALLOWED_EXTENSIONS: Record<MediaKind, string[]> = {
+  image: ['jpg', 'jpeg', 'png', 'heic'],
+  video: ['mp4', 'mov', 'm4v'],
+};
+
+const DEFAULT_EXTENSION: Record<MediaKind, string> = {
+  image: 'jpg',
+  video: 'mp4',
+};
+
+let MEDIA_DIR: string | null = null;
 
 export const initImagesDirectory = async (): Promise<string> => {
-  if (IMAGES_DIR) return IMAGES_DIR;
+  if (MEDIA_DIR) return MEDIA_DIR;
   const documentDir = FileSystem.documentDirectory;
   if (!documentDir) throw new Error('Document directory not available');
-  IMAGES_DIR = `${documentDir}note_images/`;
-  const dirInfo = await FileSystem.getInfoAsync(IMAGES_DIR);
+  // NOTE: directory name kept as note_images/ for backward compatibility
+  // with media saved by earlier versions of the app.
+  MEDIA_DIR = `${documentDir}note_images/`;
+  const dirInfo = await FileSystem.getInfoAsync(MEDIA_DIR);
   if (!dirInfo.exists) {
-    await FileSystem.makeDirectoryAsync(IMAGES_DIR, { intermediates: true });
+    await FileSystem.makeDirectoryAsync(MEDIA_DIR, { intermediates: true });
   }
-  return IMAGES_DIR;
+  return MEDIA_DIR;
 };
 
-const getImagesDir = (): string => {
-  if (!IMAGES_DIR) throw new Error('Call initImagesDirectory() first');
-  return IMAGES_DIR;
+const getMediaDir = (): string => {
+  if (!MEDIA_DIR) throw new Error('Call initImagesDirectory() first');
+  return MEDIA_DIR;
 };
 
-async function getImageMap(): Promise<Record<string, string[]>> {
-  const raw = await AsyncStorage.getItem(STORAGE_KEY);
+const getMediaMap = async (kind: MediaKind): Promise<Record<string, string[]>> => {
+  const raw = await AsyncStorage.getItem(STORAGE_KEYS[kind]);
   return raw ? JSON.parse(raw) : {};
-}
-
-export const getAllDatesWithImages = async (): Promise<string[]> => {
-  const map = await getImageMap();
-  return Object.keys(map).filter(date => map[date].length > 0);
 };
 
-export const getImagesForDate = async (date: string): Promise<string[]> => {
-  const map = await getImageMap();
-  const uris = map[date] || [];
-  const existing = [];
-  for (const uri of uris) {
-    const info = await FileSystem.getInfoAsync(uri);
-    if (info.exists) existing.push(uri);
-  }
-  return existing;
+const setMediaMap = async (kind: MediaKind, map: Record<string, string[]>): Promise<void> => {
+  await AsyncStorage.setItem(STORAGE_KEYS[kind], JSON.stringify(map));
 };
 
-async function copyImageToLocalDirectory(sourceUri: string, destinationUri: string): Promise<void> {
+const copyToLocalDirectory = async (sourceUri: string, destinationUri: string): Promise<void> => {
   if (sourceUri.startsWith('file://')) {
     await FileSystem.copyAsync({ from: sourceUri, to: destinationUri });
     return;
@@ -53,122 +59,104 @@ async function copyImageToLocalDirectory(sourceUri: string, destinationUri: stri
   await FileSystem.writeAsStringAsync(destinationUri, base64, {
     encoding: FileSystem.EncodingType.Base64,
   });
-}
+};
 
-export const saveImageForDate = async (date: string, imageUri: string): Promise<string> => {
+const pickExtension = (uri: string, kind: MediaKind): string => {
+  const fallback = DEFAULT_EXTENSION[kind];
+  if (!uri.includes('.')) return fallback;
+  const ext = uri.split('.').pop()?.toLowerCase() || fallback;
+  return ALLOWED_EXTENSIONS[kind].includes(ext) ? ext : fallback;
+};
+
+const getDatesWithMedia = async (kind: MediaKind): Promise<string[]> => {
+  const map = await getMediaMap(kind);
+  return Object.keys(map).filter(date => map[date].length > 0);
+};
+
+const getMediaForDate = async (kind: MediaKind, date: string): Promise<string[]> => {
+  const map = await getMediaMap(kind);
+  const uris = map[date] || [];
+  const existing: string[] = [];
+  for (const uri of uris) {
+    const info = await FileSystem.getInfoAsync(uri);
+    if (info.exists) existing.push(uri);
+  }
+  return existing;
+};
+
+const saveMediaForDate = async (
+  kind: MediaKind,
+  date: string,
+  sourceUri: string,
+): Promise<string> => {
   await initImagesDirectory();
-  let extension = 'jpg';
-  if (imageUri.includes('.')) {
-    const ext = imageUri.split('.').pop()?.toLowerCase() || 'jpg';
-    if (['jpg', 'jpeg', 'png', 'heic'].includes(ext)) extension = ext;
-  }
-  const timestamp = Date.now();
-  const newUri = `${getImagesDir()}${date}_${timestamp}.${extension}`;
-  await copyImageToLocalDirectory(imageUri, newUri);
-  const map = await getImageMap();
+  const extension = pickExtension(sourceUri, kind);
+  const infix = kind === 'video' ? '_video_' : '_';
+  const newUri = `${getMediaDir()}${date}${infix}${Date.now()}.${extension}`;
+  await copyToLocalDirectory(sourceUri, newUri);
+  const map = await getMediaMap(kind);
   if (!map[date]) map[date] = [];
   map[date].push(newUri);
-  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(map));
+  await setMediaMap(kind, map);
   return newUri;
 };
 
-export const deleteImage = async (date: string, imageUri: string) => {
-  const map = await getImageMap();
+const deleteMedia = async (kind: MediaKind, date: string, mediaUri: string): Promise<void> => {
+  const map = await getMediaMap(kind);
   const uris = map[date] || [];
-  await FileSystem.deleteAsync(imageUri, { idempotent: true });
-  map[date] = uris.filter(uri => uri !== imageUri);
+  await FileSystem.deleteAsync(mediaUri, { idempotent: true });
+  map[date] = uris.filter(uri => uri !== mediaUri);
   if (map[date].length === 0) delete map[date];
-  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(map));
+  await setMediaMap(kind, map);
 };
 
-export const deleteAllImagesForDate = async (date: string) => {
-  const map = await getImageMap();
+const deleteAllMediaForDate = async (kind: MediaKind, date: string): Promise<void> => {
+  const map = await getMediaMap(kind);
   const uris = map[date] || [];
   for (const uri of uris) {
     await FileSystem.deleteAsync(uri, { idempotent: true });
   }
   delete map[date];
-  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(map));
+  await setMediaMap(kind, map);
 };
 
-// ========== VIDEO STORAGE (separate key) ==========
-const VIDEO_STORAGE_KEY = 'date_video_map';
+// ========== IMAGE API ==========
 
-async function getVideoMap(): Promise<Record<string, string[]>> {
-  const raw = await AsyncStorage.getItem(VIDEO_STORAGE_KEY);
-  return raw ? JSON.parse(raw) : {};
-}
+export const getAllDatesWithImages = async (): Promise<string[]> => getDatesWithMedia('image');
 
-export const getAllDatesWithVideos = async (): Promise<string[]> => {
-  const map = await getVideoMap();
-  return Object.keys(map).filter(date => map[date].length > 0);
-};
+export const getImagesForDate = async (date: string): Promise<string[]> =>
+  getMediaForDate('image', date);
 
-export const getVideosForDate = async (date: string): Promise<string[]> => {
-  const map = await getVideoMap();
-  const uris = map[date] || [];
-  const existing = [];
-  for (const uri of uris) {
-    const info = await FileSystem.getInfoAsync(uri);
-    if (info.exists) existing.push(uri);
-  }
-  return existing;
-};
+export const saveImageForDate = async (date: string, imageUri: string): Promise<string> =>
+  saveMediaForDate('image', date, imageUri);
 
-async function copyVideoToLocalDirectory(sourceUri: string, destinationUri: string): Promise<void> {
-  // Same logic as copyImageToLocalDirectory – works for any file type
-  if (sourceUri.startsWith('file://')) {
-    await FileSystem.copyAsync({ from: sourceUri, to: destinationUri });
-    return;
-  }
-  const base64 = await FileSystem.readAsStringAsync(sourceUri, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
-  await FileSystem.writeAsStringAsync(destinationUri, base64, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
-}
+export const deleteImage = async (date: string, imageUri: string): Promise<void> =>
+  deleteMedia('image', date, imageUri);
 
-export const saveVideoForDate = async (date: string, videoUri: string): Promise<string> => {
-  await initImagesDirectory(); // reuse the same directory, but you could create a separate one
-  let extension = 'mp4';
-  if (videoUri.includes('.')) {
-    const ext = videoUri.split('.').pop()?.toLowerCase() || 'mp4';
-    if (['mp4', 'mov', 'm4v'].includes(ext)) extension = ext;
-  }
-  const timestamp = Date.now();
-  const newUri = `${getImagesDir()}${date}_video_${timestamp}.${extension}`;
-  await copyVideoToLocalDirectory(videoUri, newUri);
-  const map = await getVideoMap();
-  if (!map[date]) map[date] = [];
-  map[date].push(newUri);
-  await AsyncStorage.setItem(VIDEO_STORAGE_KEY, JSON.stringify(map));
-  return newUri;
-};
+export const deleteAllImagesForDate = async (date: string): Promise<void> =>
+  deleteAllMediaForDate('image', date);
 
-export const deleteVideo = async (date: string, videoUri: string) => {
-  const map = await getVideoMap();
-  const uris = map[date] || [];
-  await FileSystem.deleteAsync(videoUri, { idempotent: true });
-  map[date] = uris.filter(uri => uri !== videoUri);
-  if (map[date].length === 0) delete map[date];
-  await AsyncStorage.setItem(VIDEO_STORAGE_KEY, JSON.stringify(map));
-};
+// ========== VIDEO API ==========
 
-export const deleteAllVideosForDate = async (date: string) => {
-  const map = await getVideoMap();
-  const uris = map[date] || [];
-  for (const uri of uris) {
-    await FileSystem.deleteAsync(uri, { idempotent: true });
-  }
-  delete map[date];
-  await AsyncStorage.setItem(VIDEO_STORAGE_KEY, JSON.stringify(map));
-};
+export const getAllDatesWithVideos = async (): Promise<string[]> => getDatesWithMedia('video');
+
+export const getVideosForDate = async (date: string): Promise<string[]> =>
+  getMediaForDate('video', date);
+
+export const saveVideoForDate = async (date: string, videoUri: string): Promise<string> =>
+  saveMediaForDate('video', date, videoUri);
+
+export const deleteVideo = async (date: string, videoUri: string): Promise<void> =>
+  deleteMedia('video', date, videoUri);
+
+export const deleteAllVideosForDate = async (date: string): Promise<void> =>
+  deleteAllMediaForDate('video', date);
+
+// ========== COMBINED ==========
 
 export const getAllDatesWithMedia = async (): Promise<string[]> => {
   const imageDates = await getAllDatesWithImages();
   const videoDates = await getAllDatesWithVideos();
   // Combine and remove duplicates
-  const combined = [...new Set([...imageDates, ...videoDates])];
-  return combined;
+  return [...new Set([...imageDates, ...videoDates])];
 };

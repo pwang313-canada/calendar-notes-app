@@ -25,8 +25,6 @@ import {
   setupNotificationHandler,
 } from './src/utils/notifications';
 
-setupNotificationHandler();
-
 const STORAGE_KEY = 'calendar_notes_v4';
 
 // Custom Day Component
@@ -71,7 +69,6 @@ export default function App() {
   const [mediaModalVisible, setMediaModalVisible] = useState(false);
   const [mediaDates, setMediaDates] = useState<string[]>([]);
 
-  const [isLoaded, setIsLoaded] = useState(false)
   const loadMediaDates = async () => {
     try {
       const dates = await getAllDatesWithMedia();
@@ -85,7 +82,6 @@ export default function App() {
   const saveNotes = async (newNotes: typeof notes) => {
     try {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(newNotes));
-      console.log('✅ Notes saved:', newNotes);
     } catch (error) {
       console.error('Save failed:', error);
     }
@@ -96,7 +92,6 @@ export default function App() {
       const stored = await AsyncStorage.getItem(STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
-        console.log('📦 Loaded notes:', parsed);
         setNotes(parsed);
         // Re‑schedule alarms
         for (const [date, data] of Object.entries(parsed) as any[]) {
@@ -104,8 +99,6 @@ export default function App() {
             await scheduleNotification(date, data.alarm, data.text, data.icon);
           }
         }
-      } else {
-        console.log('No notes found.');
       }
     } catch (error) {
       console.error('Load failed:', error);
@@ -113,6 +106,7 @@ export default function App() {
   };
 
   useEffect(() => {
+    setupNotificationHandler();
     const init = async () => {
       await registerForNotifications();
       await loadNotes();
@@ -181,14 +175,6 @@ export default function App() {
 
   const iconOptions = ['📝', '🐟', '💡', '📅', '🎉', '❤️', '🏋️', '💼', '🍔', '✈️'];
 
-  const getMarkedDates = () => {
-    const marked: any = {};
-    Object.keys(notes).forEach(date => {
-      marked[date] = { customStyles: { container: { backgroundColor: '#c6f6d5', borderRadius: 20 } } };
-    });
-    return marked;
-  };
-
   const formatDateHeader = (dateString: string) => {
     if (!dateString) return '';
     const [year, month, day] = dateString.split('-');
@@ -208,8 +194,6 @@ export default function App() {
 
       <Calendar
         onDayPress={onDayPress}
-        markingType="custom"
-        markedDates={getMarkedDates()}
         dayComponent={(props) => <CustomDay {...props} onPress={onDayPress} notes={notes} mediaDates={mediaDates} />}
         theme={{
           calendarBackground: '#ffffff',
