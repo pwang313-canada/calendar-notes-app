@@ -63,7 +63,8 @@
       ],
       "@react-native-community/datetimepicker",
       "expo-secure-store",
-      "expo-sqlite"
+      "expo-sqlite",
+      "expo-font"
     ],
     "experiments": {
       "typedRoutes": true,
