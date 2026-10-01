@@ -1,3 +1,8 @@
+// src/components/DateImageModal.tsx
+// Restored 2026-09-30: this file had been overwritten with date-picker code.
+// This is the original image/video modal. Props: visible, date ("YYYY-MM-DD"
+// string — matches imageStorage keys), onClose, onImageChange.
+// MARKER: dateImageModalRestored
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import { VideoView, useVideoPlayer } from 'expo-video';
@@ -131,8 +136,10 @@ export default function DateImageModal({ visible, date, onClose, onImageChange }
         );
         return;
       }
-      const mediaTypes =
-        kind === 'image' ? ImagePicker.MediaTypeOptions.Images : ImagePicker.MediaTypeOptions.Videos;
+      // SDK 57: MediaType is a string union ('images' | 'videos' | 'livePhotos'),
+      // not an enum — MediaTypeOptions is deprecated.
+      const mediaTypes: ImagePicker.MediaType =
+        kind === 'image' ? 'images' : 'videos';
       const options = {
         mediaTypes,
         quality: 0.8,

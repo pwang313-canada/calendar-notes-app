@@ -1,10 +1,28 @@
 // src/utils/notifications.ts
-import * as Notifications from 'expo-notifications';
 import { Alert, Platform } from 'react-native';
 
 export type ReminderType = 'notification' | 'alarm' | 'both';
 
+// expo-notifications was removed from Expo Go in SDK 53+: a top-level import
+// crashes the whole app there (and cascades into expo-router route errors).
+// Load it lazily instead — the app runs in Expo Go with reminders disabled,
+// and works fully in a development build. MARKER: expoGoSafeNotifications
+let Notifications: typeof import('expo-notifications') | null = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  Notifications = require('expo-notifications');
+} catch {
+  Notifications = null;
+}
+
+export const isNotificationsAvailable = () => Notifications !== null;
+
+// NOTE: guards below are deliberately silent. The "needs a dev build"
+// message is shown by the UI at the moment the user taps "Set reminder"
+// (see App.tsx), not on app launch or during background re-scheduling.
+
 export const setupNotificationHandler = () => {
+  if (!Notifications) return;
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
       shouldShowBanner: true,
@@ -16,6 +34,7 @@ export const setupNotificationHandler = () => {
 };
 
 export const registerForNotifications = async (): Promise<boolean> => {
+  if (!Notifications) return false;
   const { status } = await Notifications.requestPermissionsAsync();
   if (status !== 'granted') {
     Alert.alert('Permission Required', 'Please enable notifications to receive reminders.');
@@ -45,6 +64,7 @@ export const scheduleNotification = async (
   icon: string,
   reminderType: ReminderType = 'both',
 ) => {
+  if (!Notifications) return null;
   if (!isValidTriggerTime(timestamp)) {
     return null;
   }
@@ -92,6 +112,7 @@ export const scheduleNotification = async (
 };
 
 export const cancelNotification = async (dateString: string) => {
+  if (!Notifications) return;
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
   const toCancel = scheduled.filter(n => n.content.data?.date === dateString);
   for (const n of toCancel) {

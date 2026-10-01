@@ -5,16 +5,19 @@ import {
   KeyboardAvoidingView,
   Modal,
   Platform,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  TextStyle,
   TouchableOpacity,
   View,
+  ViewStyle,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+
 import { Calendar } from 'react-native-calendars';
-import DateTimePickerModal from 'react-native-modal-datetime-picker';
+import DateTimePickerModal from './src/components/DateTimePickerModal';
 
 import DateImageModal from './src/components/DateImageModal';
 import { getAllDatesWithMedia } from './src/utils/imageStorage';
@@ -27,6 +30,15 @@ import {
 
 const STORAGE_KEY = 'calendar_notes_v4';
 
+// "YYYY-MM-DD" for the device's local today, so the calendar can mark it.
+// MARKER: todayMark
+const todayString = (() => {
+  const d = new Date();
+  const m = `${d.getMonth() + 1}`.padStart(2, '0');
+  const day = `${d.getDate()}`.padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
+})();
+
 // Custom Day Component
 const CustomDay = memo(
   ({ date, state, onPress, notes, mediaDates }: any) => {
@@ -34,14 +46,17 @@ const CustomDay = memo(
     const note = notes[dateString];
     const hasNote = !!note;
     const hasMedia = mediaDates?.includes(dateString);
+    const isToday = dateString === todayString;
     const icon = note?.icon || '';
 
-    let containerStyle = styles.dayContainer;
-    let textStyle = styles.dayText;
+    let containerStyle: ViewStyle = styles.dayContainer;
+    let textStyle: TextStyle = styles.dayText;
 
     if (hasNote) containerStyle = { ...containerStyle, ...styles.dayWithNote };
     else if (hasMedia) containerStyle = { ...containerStyle, ...styles.dayWithMedia };
+    if (isToday) containerStyle = { ...containerStyle, ...styles.todayContainer };
     if (state === 'disabled') textStyle = { ...textStyle, ...styles.disabledDayText };
+    else if (isToday) textStyle = { ...textStyle, ...styles.todayText };
 
     return (
       <TouchableOpacity style={containerStyle} onPress={() => onPress(date)} activeOpacity={0.7}>
@@ -55,7 +70,7 @@ const CustomDay = memo(
   (prevProps, nextProps) =>
     prevProps.notes[prevProps.date.dateString] === nextProps.notes[nextProps.date.dateString] &&
     prevProps.mediaDates?.includes(prevProps.date.dateString) ===
-      nextProps.mediaDates?.includes(nextProps.date.dateString)
+    nextProps.mediaDates?.includes(nextProps.date.dateString)
 );
 
 export default function App() {
@@ -210,6 +225,7 @@ export default function App() {
         <View style={styles.legendItem}><View style={[styles.legendColor, styles.legendNormal]} /><Text style={styles.legendText}>No note</Text></View>
         <View style={styles.legendItem}><View style={[styles.legendColor, styles.legendHasNote]} /><Text style={styles.legendText}>Note + icon</Text></View>
         <View style={styles.legendItem}><View style={[styles.legendColor, styles.legendHasMedia]} /><Text style={styles.legendText}>Picture / video only</Text></View>
+        <View style={styles.legendItem}><View style={[styles.legendColor, styles.legendToday]} /><Text style={styles.legendText}>Today</Text></View>
       </View>
 
       {/* Note Modal */}
@@ -268,6 +284,8 @@ const styles = StyleSheet.create({
   dayText: { fontSize: 16, color: '#2d3748', fontWeight: '500' },
   dayWithNote: { backgroundColor: '#c6f6d5', borderRadius: 22 },
   dayWithMedia: { backgroundColor: '#fef9c3', borderRadius: 22 },
+  todayContainer: { borderWidth: 2, borderColor: '#e53e3e', borderRadius: 22 },
+  todayText: { color: '#e53e3e', fontWeight: 'bold' },
   disabledDayText: { color: '#cbd5e0' },
   dayIcon: { fontSize: 12, position: 'absolute', bottom: 2, right: 2 },
   mediaDot: { position: 'absolute', bottom: 4, right: 4, width: 8, height: 8, borderRadius: 4, backgroundColor: '#ecc94b' },
@@ -277,6 +295,7 @@ const styles = StyleSheet.create({
   legendNormal: { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#cbd5e0' },
   legendHasNote: { backgroundColor: '#c6f6d5' },
   legendHasMedia: { backgroundColor: '#fef9c3' },
+  legendToday: { backgroundColor: 'transparent', borderWidth: 2, borderColor: '#e53e3e' },
   legendText: { fontSize: 12, color: '#4a5568' },
   modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
   modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 20, paddingTop: 20, paddingBottom: Platform.OS === 'ios' ? 30 : 20, minHeight: 400 },
