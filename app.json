@@ -33,6 +33,14 @@
     },
     "plugins": [
       [
+        "react-native-google-mobile-ads",
+        {
+          "androidAppId": "ca-app-pub-4457502267749040~5186812214",
+          "iosAppId": "ca-app-pub-3940256099942544~1458695194",
+          "androidSdk": "classic"
+        }
+      ],
+      [
         "expo-image-picker",
         {
           "cameraPermission": "Allow $(PRODUCT_NAME) to access your camera to take photos for calendar dates.",

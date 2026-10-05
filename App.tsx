@@ -14,6 +14,11 @@ import {
   View,
   ViewStyle,
 } from 'react-native';
+import mobileAds, {
+  BannerAd,
+  BannerAdSize,
+  TestIds,
+} from 'react-native-google-mobile-ads';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Calendar } from 'react-native-calendars';
@@ -29,6 +34,11 @@ import {
 } from './src/utils/notifications';
 
 const STORAGE_KEY = 'calendar_notes_v4';
+
+// AdMob banner: test ads in dev, real ads in release builds.
+const BANNER_AD_UNIT_ID = __DEV__
+  ? TestIds.BANNER
+  : 'ca-app-pub-4457502267749040/2041859845';
 
 // "YYYY-MM-DD" for the device's local today, so the calendar can mark it.
 // MARKER: todayMark
@@ -122,6 +132,7 @@ export default function App() {
 
   useEffect(() => {
     setupNotificationHandler();
+    mobileAds().initialize();
     const init = async () => {
       await registerForNotifications();
       await loadNotes();
@@ -202,6 +213,10 @@ export default function App() {
 
   return (
     <SafeAreaView style={styles.container}>
+      <BannerAd
+        unitId={BANNER_AD_UNIT_ID}
+        size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER}
+      />
       <View style={styles.header}>
         <Text style={styles.headerTitle}>📅 Calendar Notes</Text>
         <Text style={styles.headerSubtitle}>Tap date → add note, icon, alarm & picture/video</Text>
